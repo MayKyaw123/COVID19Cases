@@ -1,0 +1,249 @@
+---
+title: "STAT400 Final Project, JHU COVID-19 Reported Cases and Deaths in Maryland, May 2021"
+author: "May Kyaw, Maria Malishev, Thanushree Manjunath, Kenth Santibanez Rivera, and Chinmay Sevak"
+output:
+  html_document:
+    number_sections: yes
+    toc: yes  
+  pdf_document:
+    toc: yes
+editor_options: 
+  chunk_output_type: inline
+---
+# Introduction
+In the following report, the most recent data set (April 8th 2021) relating to official reported cases and reported deaths due to the COVID-19 virus in the state of Maryland, in the United States was used for statistical analysis.
+
+The data set was obtained from the John Hopkins University Center for Systems Science and Engineering (JHU CSSE). The data set can be accessed at the following link: https://github.com/CSSEGISandData/COVID-19
+
+This report evaluates the change in average daily infections and deaths due to the COVID-19 virus in Maryland before and after major COVID-19 vaccinations efforts were undertaken in the state, and draws conclusion about the efficacy of vaccinations int he population of Maryland.
+
+The world has reached globalization levels which make any single country's problem, the entire world's problem with an ever connected world economy, politics, and people demographics. Thus, understanding what happens in the state of Maryland during this COVID-19 world pandemic, and how effective vaccines are are mitigating infections and deaths in it's population due to COVID-19 offer valuable insights into the importance of safeguarding and preparing against future pandemics in Maryland and the world.
+
+# Analysis/Visualizations
+
+```{r message=TRUE, warning=TRUE, include=FALSE}
+# This chunk of code calls on all the libraries to be used for the analysis/visualizations to follow
+
+#install.packages("devtools")1                    # to create gifs
+#devtools::install_github("thomasp85/gganimate")  # to create gifs
+#devtools::install_github("thomasp85/transformr") # to create gifs
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(janitor)
+library(gganimate)
+library(gifski)
+library(png)
+library(ggrepel)
+library(scales)
+library(gapminder)
+library(shinyWidgets)
+library(data.table)
+```
+
+## Reading The Data
+The following lines access the two csv data files to be used
+
+```{r}
+US_Deaths <- "./COVID-19-master_April_8_2021/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_US.csv"
+US_confirmed <- "./COVID-19-master_April_8_2021/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_US.csv"
+
+deaths <- read.csv(US_Deaths)   #Reads in Deaths Over Time in the csv file
+cases <- read.csv(US_confirmed) #Reads in Cases Over Time in the csv file
+#The lines below have been commented to make the output knit friendly
+#head(deaths) # Displays the first few rows of our dataset
+#head(cases)  # uncomment to see dataframe in RStudio
+```
+
+## Data Preprocessing
+ Clean up the dataset for eventual plotting
+ 
+```{R}
+# filter the data to only include the relevant columns
+cases = cases %>% select("Province_State" | starts_with("X"))
+deaths = deaths %>% select("Province_State" | starts_with("X"))
+
+# Now filter the data further by grouping by state
+cases = cases %>% group_by(Province_State) %>% summarise(across(starts_with("X"), sum))
+deaths = deaths %>% group_by(Province_State) %>% summarise(across(starts_with("X"), sum))
+
+# Now melt the columns for state and date 
+setDT(cases)
+cases = cases %>% melt(cases, id=c("Province_State"), measure=patterns("^X"), value.name="Cases", variable.name="Date")
+setDT(deaths)
+deaths = deaths %>% melt(deaths, id=c("Province_State"), measure=patterns("^X"), value.name="Deaths", variable.name="Date")
+
+# Convert the dates format to a format more useful in R
+cases$Date = as.Date(cases$Date, format="X%m.%d.%y")
+deaths$Date = as.Date(deaths$Date, format="X%m.%d.%y")
+
+# Merging Two Tables into a single table
+covid <- merge(cases, deaths, by=c("Province_State", "Date"))
+```
+
+## Data Exploration
+
+Now that data has been filtered and more clearly formatted, plot the cases and deaths due to COVID-19 in Maryland
+
+```{r}
+# Now filter rows by desired state
+state = "Maryland"  # Pre-define the state of interest
+state_covid = covid %>% filter(Province_State == state) # filter by pre-defined state
+Maryland_cases <- state_covid$Cases
+Maryland_deaths <- state_covid$Deaths
+
+# Find useful index values
+start_ind <- match(as.Date("2020-11-15"), state_covid$Date) # date from which analysis will be done to prevent large data skewing
+vacc_ind  <- match(as.Date("2021-01-04"), state_covid$Date) # Find the index corresponding to the initial vaccination efforts date in Maryland
+end_ind <- match(as.Date("2021-05-07"), state_covid$Date)   # find the final index of the date data
+
+# Filter data for new infection cases by pre and post vaccine efforts
+cases_prevaccine <- (Maryland_cases[(start_ind):(vacc_ind-1)])-(Maryland_cases[(start_ind-1):(vacc_ind-2)]) # indices offset subtraction to get daily cases
+mu1 <- mean(cases_prevaccine) # compute daily mean
+
+cases_postvaccine <- (Maryland_cases[(vacc_ind+1):end_ind])-(Maryland_cases[vacc_ind:(end_ind-1)])
+mu2 <- mean(cases_postvaccine) # compute daily mean
+
+# Filter data for deaths by pre and post vaccine efforts
+deaths_prevaccine <- (Maryland_deaths[(start_ind):(vacc_ind-1)])-(Maryland_deaths[(start_ind-1):(vacc_ind-2)])# indices offset subtraction to get daily deaths
+mu3 <- mean(deaths_prevaccine) # compute daily mean
+
+deaths_postvaccine <- (Maryland_deaths[(vacc_ind+1):end_ind])-(Maryland_deaths[vacc_ind:(end_ind-1)])
+mu4 <- mean(deaths_postvaccine) # compute daily mean
+
+# Tabulate the means from above and display
+tab <- as.table(rbind(c(mu1,mu3), c(mu2,mu4)))
+dimnames(tab) <- list(Time_of_Metric = c("Pre Vaccine", "Post vaccine"),
+Metric_Daily_Mean = c("Reported New Cases", "Reported Deaths"))
+tab
+```
+
+## Create Plots
+
+Two plots created. One for new reported cases and one for deaths related to the virus. Vertical lines were drawn in reference to the date when different phases of the vaccination efforts were undertaken in Maryland.
+Phase 1a vaccine available for all first line responders (nurses, police, EMT, Heath Care Workers)
+Phase 2a vaccine available for people 60 years or older
+Phase 3 vaccine available for people 16 years or older
+In particular, a black dashed vertical line was placed to reference where the the data to be analyzed beginnings
+The team decided to begin the date from there to prevent large skewness in the analysis
+
+```{r}
+# Plot the reported cases
+plot(state_covid$Date, Maryland_cases, xaxt = "n", xlab="Date", ylab="Cases", col="red")
+title(paste("Covid-19 Cases in", state))
+abline(v=as.Date("2021-01-04"),col='orange', lwd = 2) #start phase 1a
+abline(v=as.Date("2021-03-23"),col='purple', lwd = 2) #start phase 2a
+abline(v=as.Date("2021-04-12"),col='pink', lwd = 2)   #start phase 3
+abline(v=as.Date("2021-04-30"),col='green', lwd = 2)  #mask mandate lifted for fully vax
+abline(v=as.Date("2020-11-15"),col='black', lty=2, lwd = 2)
+axis.Date(1,at=seq(min(state_covid$Date), max(state_covid$Date), by="months"), format="%m-%Y",las=1) # better format the tick marks and labels
+legend ("topleft", legend = c("Cases","Start of data used","Phase 1a", "Phase 2a", "Phase 3", "No Mask Reqd. for Fully Vaccinated"),
+        col = c("red","black","orange","purple","pink","green"),
+        lty = c(1,2,1,1,1,1))
+
+# plot the reported deaths
+plot(state_covid$Date, Maryland_deaths, xaxt = "n", xlab="Date", ylab="Deaths", col="blue")
+title(paste("Covid-19 Deaths in", state))
+abline(v=as.Date("2021-01-04"),col='orange', lwd = 2) #start phase 1a
+abline(v=as.Date("2021-03-23"),col='purple', lwd = 2) #start phase 2a
+abline(v=as.Date("2021-04-12"),col='pink', lwd = 2)   #start phase 3
+abline(v=as.Date("2021-04-30"),col='green', lwd = 2)  #mask mandate lifted for fully vax
+abline(v=as.Date("2020-11-15"),col='black', lty=2, lwd = 2)
+axis.Date(1,at=seq(min(state_covid$Date), max(state_covid$Date), by="months"), format="%m-%Y",las=1) # better format the tick marks and labels
+legend ("topleft", legend = c("Deaths","Start of data used","Phase 1a", "Phase 2a", "Phase 3", "No Mask Reqd. for Fully Vaccinated"),
+        col = c("blue","black","orange","purple","pink","green"),
+         lty = c(1,2,1,1,1,1))
+```
+
+## Animate Plots & Create gif Files for the Powerpoint Presentation
+
+Let's first use ggplot to draw out the trends:
+
+```{R}
+library(ggplot2)
+library(gganimate)
+theme_set(theme_bw())
+
+cases_plt <- ggplot( state_covid, #The dataframe we are using to create the plot
+                    aes(x=Date,y=Cases)) +
+ #The x and y variables
+  geom_point(show.legend = FALSE, alpha = .7) + 
+  geom_vline(xintercept=as.Date("2020-11-15"),col='black',lwd=1, lty=2)+
+  geom_vline(xintercept=as.Date("2021-01-04"),col='orange',lwd=1) +  #start phase 1a
+  geom_vline(xintercept=as.Date("2021-03-23"),col='purple',lwd=1) +  #start phase 2a
+  geom_vline(xintercept=as.Date("2021-04-12"),col='pink',lwd=1)+     #start phase 3
+  geom_vline(xintercept=as.Date("2021-04-30"),col='green',lwd=1)+    #mask mandate lifted for fully the vaccinated
+  labs(x="Date",  #Label of X Axis
+       y="Cases", #Label of Y Axis
+       title=paste("Covid-19 Cases in", state)) +
+  scale_x_date(date_breaks="4 month", date_labels="%B-%Y") # set the x tick marks to 4 month intervals
+
+# to create gif, add a + at the end of the previous line of code and un-comment the 5 lines below
+#  transition_time(Date) + #Allows us to animate our data
+#  labs(title = "Date: {frame_time}") + #Adds a Title With the Date On The Top
+#  shadow_mark(alpha = 1, size = 0.5)   #Leaves Data From Old Dates Behind
+#animate(cases_plt, width = 1024, height = 768)
+#anim_save("cases.gif")
+
+#plot(cases_plt) # will not plot to save space
+
+  
+
+#Repeat Procedure For Deaths
+deaths_plt <- ggplot( state_covid, 
+                     aes(x=Date,y=Deaths)) +
+  geom_point(show.legend = FALSE, alpha = .7) + 
+  geom_vline(xintercept=as.Date("2020-11-15"),col='black',lwd =1, lty=2)+
+  geom_vline(xintercept=as.Date("2021-01-04"),col='orange',lwd=1) +   #start phase 1a
+  geom_vline(xintercept=as.Date("2021-03-23"),col='purple',lwd=1) +   #start phase 2a
+  geom_vline(xintercept=as.Date("2021-04-12"),col='pink',lwd=1)+      #start phase 3a
+  geom_vline(xintercept=as.Date("2021-04-30"),col='green',lwd=1)+     #mask mandate lifted for the fully vaccinated
+  labs(x="Date",
+       y="Deaths",
+       title=paste("Covid-19 Deaths in", state)) +
+  scale_x_date(date_breaks="4 month", date_labels="%B-%Y") # set the x tick marks to 4 month intervals
+
+# to create gif, add a + at the end of the previous line of code and un-comment the 5 lines below
+#  transition_time(Date) + #Allows us to animate our data
+#  labs(title = "Date: {frame_time}") + #Adds a Title With the Date On The Top
+#  shadow_mark(alpha = 1, size = 0.5)   #Leaves Data From Old Dates Behind
+#animate(deaths_plt, width = 1024, height = 768)
+#anim_save("deaths.gif")
+
+# plot(deaths_plt) # will not plot to save space
+```
+
+Animate the cases graph
+
+```{R}
+cases_plt + 
+  transition_time(Date) + #Allows us to animate our data
+  labs(title = "Date: {frame_time}") + #Adds a Title With the Date On The Top
+  shadow_mark(alpha = 1, size = 0.5) #Leaves Data From Old Dates Behind
+
+```
+
+Animate the deaths graph
+
+```{R}
+deaths_plt + 
+  transition_time(Date) + 
+  labs(title = "Date: {frame_time}") +
+  shadow_mark(alpha = 1, size = 0.5) 
+```
+
+# Conclusion
+
+As can be seen from the figures above, and the table presenting the daily average for infection cases and deaths due to COVID-19 in Maryland, the mean was higher
+for both cases and deaths even after the vaccination efforts were in place. However, it is worth noting two major limitations of the analysis of the data. First, that the most recent data available is only up until April 7th 2021 while serious vaccination efforts began only as recent as January 4th, and most of the population 16 years or older was only offered th vaccine in April 12th 2021. Perhaps this presents too short a time frame to accurately characterize the effects of the vaccine on the reported cases and deaths in Maryland. 
+Second, the travel restrictions have been eased steadily since the vaccine became available, and not all people were willing to quickly receive the vaccinations making the sample heavily dependent on factors such as human behavior, across state and even international travel which might have impeded the ability to have a controlled sample.
+Finally, even though the daily mean for cases and deaths are higher even after vaccination efforts, all plots show that the rate, or slope, at which cases and deaths were reported decreased very clearly from the onset of the vaccination efforts, perhaps further pointing at a longer time frame needed to analyze the vaccination effects on the population of Maryland while also showing the quick results from vaccination efforts in the state.
+
+# Future Work
+
+Perhaps the most clear possibility of future work is to allow data to be collected for a longer period from the onset of vaccination efforts to repeat the analysis,
+and compare the results.
+Another potential future endeavor could be to try to fit the distribution of cases and deaths in Maryland to one of the distributions studied in class, to be able to analyze it with all of the methods presented in class, and perhaps to make a more general statement about cases and deaths based on the sample from Marylanders' data
+about the entire U.S, population.
+It may be useful to explore the same dataset for other regions, likely by state. This analysis could be catered to the vaccine distribution plans of each region, and could provide greater insight on vaccine distribution effectiveness. Furthermore, vaccine distribution data (specific numbers on vaccine type and number of shots) could provide better insight on the time delay on the presumed correlation between vaccine distribution and COVID-19 cases.
